@@ -1,0 +1,451 @@
+// Interactive world map (SVG, Equal Earth projection, Natural Earth outlines).
+// Supports wheel / pinch / button zoom, drag to pan, and click-to-pick.
+import { s, h, clear, icon } from './dom.js';
+import { equalEarth, equalEarthInverse } from '../core/geo.js';
+import { getWorld, getSatellite, satelliteTileUrl } from '../core/data.js';
+
+const K = 100; // projection units -> SVG units
+const LAT_TOP = 84;
+const LAT_BOTTOM = -58;
+const MAX_ZOOM = 60;
+
+function project(lon, lat) {
+  const [x, y] = equalEarth(lon, lat);
+  return [x * K, -y * K];
+}
+
+function ringPath(r) {
+  let d = '';
+  for (let i = 0; i < r.length; i += 2) {
+    const [x, y] = project(r[i], r[i + 1]);
+    d += `${i ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }
+  return `${d}Z`;
+}
+
+function linePath(points) {
+  return points.map(([lon, lat], i) => {
+    const [x, y] = project(lon, lat);
+    return `${i ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join('');
+}
+
+let pathsPromise = null;
+/** Pre-computed SVG path data, shared by every map instance. */
+function getPaths() {
+  pathsPromise ??= getWorld().then((world) => {
+    const byId = new Map();
+    let other = '';
+    for (const f of world) {
+      let d = '';
+      for (const poly of f.p) for (const ring of poly) d += ringPath(ring);
+      if (f.id) byId.set(f.id, (byId.get(f.id) || '') + d);
+      else other += d;
+    }
+    // graticule every 30°
+    let grat = '';
+    for (let lon = -150; lon <= 150; lon += 30) {
+      const pts = [];
+      for (let lat = -90; lat <= 90; lat += 5) pts.push([lon, lat]);
+      grat += linePath(pts);
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+      const pts = [];
+      for (let lon = -180; lon <= 180; lon += 5) pts.push([lon, lat]);
+      grat += linePath(pts);
+    }
+    const edge = [];
+    for (let lat = -90; lat <= 90; lat += 2) edge.push([-180, lat]);
+    for (let lat = 90; lat >= -90; lat -= 2) edge.push([180, lat]);
+    const sphere = `${linePath(edge)}Z`;
+    return { byId, other, grat, sphere };
+  });
+  return pathsPromise;
+}
+
+const STYLE_KEY = 'atlas-daily:map-style';
+function savedStyle() {
+  try {
+    return localStorage.getItem(STYLE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {object} o
+ * @param {(p: {lat:number, lon:number}) => void} [o.onPick]  click handler (interactive maps)
+ * @param {string} [o.label]  accessible label
+ * @param {boolean} [o.borders]  draw country borders (plan style)
+ * @param {boolean} [o.satellite]  offer the satellite background (NASA Blue Marble), on by default
+ */
+export function createWorldMap({ onPick = null, label = 'Carte du monde', borders = true, satellite = false } = {}) {
+  const [xMax] = project(180, 0);
+  const [, yTop] = project(0, LAT_TOP);
+  const [, yBottom] = project(0, LAT_BOTTOM);
+  const full = { x: -xMax - 4, y: yTop - 4, w: 2 * xMax + 8, h: yBottom - yTop + 8 };
+  let vb = { ...full };
+  let interactive = Boolean(onPick);
+  let overlays = []; // {kind, ...}
+  const countryEls = new Map();
+  let highlighted = { ids: [], cls: 'wm-hl' }; // re-applied once the paths are loaded
+
+  const svg = s('svg', {
+    class: 'wm-svg',
+    viewBox: `${full.x} ${full.y} ${full.w} ${full.h}`,
+    preserveAspectRatio: 'xMidYMid meet',
+    role: 'img',
+    'aria-label': label,
+  });
+  const gSatLow = s('g', { class: 'wm-sat-low' });
+  const gSatHigh = s('g', { class: 'wm-sat-high' });
+  const gBase = s('g', { class: 'wm-base' });
+  const gOver = s('g', { class: 'wm-over' });
+  svg.append(gSatLow, gSatHigh, gBase, gOver);
+  let satOn = satellite && savedStyle() !== 'plan';
+  let satManifest = null;
+
+  const zoomBtns = h('div', { class: 'wm-zoom' },
+    h('button', { class: 'icon-btn', type: 'button', title: 'Zoom avant', 'aria-label': 'Zoom avant', onClick: () => zoomCenter(0.6) }, icon('plus')),
+    h('button', { class: 'icon-btn', type: 'button', title: 'Zoom arrière', 'aria-label': 'Zoom arrière', onClick: () => zoomCenter(1 / 0.6) }, icon('minus')),
+    h('button', { class: 'icon-btn', type: 'button', title: 'Vue entière', 'aria-label': 'Vue entière', onClick: () => reset() }, icon('reset')));
+  const kbdHelp = h('p', { class: 'wm-kbd', 'aria-hidden': 'true' }, 'Flèches : déplacer · Entrée : placer · + / − : zoom');
+  const credit = h('p', { class: 'wm-credit' }, 'Image : NASA Blue Marble');
+  const styleBtns = satellite
+    ? h('div', { class: 'wm-style', role: 'group', 'aria-label': 'Fond de carte' },
+      ['satellite', 'plan'].map((st) => h('button', {
+        type: 'button', 'data-style': st, 'aria-pressed': 'false',
+        onClick: () => setSatellite(st === 'satellite', true),
+      }, st === 'satellite' ? 'Satellite' : 'Plan')))
+    : null;
+  const el = h('div', { class: `wm${interactive ? ' wm-interactive' : ''}${borders ? '' : ' wm-noborders'}`, style: { aspectRatio: `${full.w} / ${full.h}` } }, svg, zoomBtns, kbdHelp, satellite ? credit : null, styleBtns);
+  let cursor = null; // keyboard cursor {lat, lon}
+
+  function setKeyboard(on) {
+    if (on) {
+      svg.setAttribute('tabindex', '0');
+      svg.setAttribute('role', 'application');
+      svg.setAttribute('aria-label', `${label}. Flèches pour déplacer le curseur, Entrée pour placer, plus et moins pour zoomer.`);
+    } else {
+      svg.removeAttribute('tabindex');
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', label);
+      cursor = null;
+    }
+  }
+  setKeyboard(interactive);
+
+  svg.addEventListener('keydown', (e) => {
+    if (!interactive || !onPick) return;
+    const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    if (moves[e.key]) {
+      e.preventDefault();
+      if (!cursor) {
+        const c = equalEarthInverse((vb.x + vb.w / 2) / K, -(vb.y + vb.h / 2) / K) || [0, 20];
+        cursor = { lon: c[0], lat: c[1] };
+      }
+      const step = vb.w * 0.025 * (180 / Math.PI) / K * (e.shiftKey ? 4 : 1);
+      const [dx, dy] = moves[e.key];
+      cursor = {
+        lon: Math.max(-180, Math.min(180, cursor.lon + dx * step)),
+        lat: Math.max(LAT_BOTTOM, Math.min(LAT_TOP, cursor.lat + dy * step)),
+      };
+      // keep the cursor in view
+      const [cx, cy] = project(cursor.lon, cursor.lat);
+      if (cx < vb.x || cx > vb.x + vb.w || cy < vb.y || cy > vb.y + vb.h) {
+        vb = { ...vb, x: cx - vb.w / 2, y: cy - vb.h / 2 };
+        clampVB();
+        applyVB();
+      } else {
+        drawOverlays();
+      }
+    } else if ((e.key === 'Enter' || e.key === ' ') && cursor) {
+      e.preventDefault();
+      e.stopPropagation();
+      onPick({ ...cursor });
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      zoomCenter(0.6);
+    } else if (e.key === '-') {
+      e.preventDefault();
+      zoomCenter(1 / 0.6);
+    }
+  });
+
+  getPaths().then(({ byId, other, grat, sphere }) => {
+    gBase.append(s('path', { class: 'wm-sphere', d: sphere }));
+    gBase.append(s('path', { class: 'wm-grat', d: grat }));
+    gBase.append(s('path', { class: 'wm-land wm-other', d: other }));
+    for (const [id, d] of byId) {
+      const p = s('path', { class: 'wm-land', d, 'data-id': id });
+      countryEls.set(id, p);
+      if (highlighted.ids.includes(id)) p.classList.add(highlighted.cls);
+      gBase.append(p);
+    }
+    drawOverlays();
+  });
+
+  // --------------------------------------------------------------- satellite
+  // Tiles are pre-rendered in the same Equal Earth frame (tools/build_satellite.py).
+  // Level 0 always covers the whole map; one sharper level is added for the view.
+  function satTile(level, li, key) {
+    const [c, r] = key.split('_').map(Number);
+    const { extent, tile } = satManifest;
+    const unitsPerTilePx = (extent.x1 - extent.x0) / level.w;
+    const wpx = Math.min(tile, level.w - c * tile);
+    const hpx = Math.min(tile, level.h - r * tile);
+    return s('image', {
+      href: satelliteTileUrl(li, key),
+      x: extent.x0 + c * tile * unitsPerTilePx,
+      y: extent.y0 + r * tile * unitsPerTilePx,
+      // a hair of overlap hides seams between tiles
+      width: wpx * unitsPerTilePx + 0.02,
+      height: hpx * unitsPerTilePx + 0.02,
+      preserveAspectRatio: 'none',
+      'data-key': `${li}/${key}`,
+    });
+  }
+
+  function updateSatellite() {
+    if (!satOn || !satManifest) return;
+    const { extent, levels, tile } = satManifest;
+    const extW = extent.x1 - extent.x0;
+    if (!gSatLow.firstChild) {
+      for (const key of levels[0].tiles) gSatLow.append(satTile(levels[0], 0, key));
+    }
+    const needPxPerUnit = (1 / unitsPerPx()) * (window.devicePixelRatio || 1);
+    let li = levels.findIndex((L) => L.w / extW >= needPxPerUnit);
+    if (li < 0) li = levels.length - 1;
+    const want = new Set();
+    if (li > 0) {
+      const L = levels[li];
+      const tu = (tile * extW) / L.w; // tile size in SVG units
+      const have = L._set ??= new Set(L.tiles);
+      const c0 = Math.max(0, Math.floor((vb.x - extent.x0) / tu));
+      const c1 = Math.min(L.cols - 1, Math.floor((vb.x + vb.w - extent.x0) / tu));
+      const r0 = Math.max(0, Math.floor((vb.y - extent.y0) / tu));
+      const r1 = Math.min(L.rows - 1, Math.floor((vb.y + vb.h - extent.y0) / tu));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          if (have.has(`${c}_${r}`)) want.add(`${li}/${c}_${r}`);
+        }
+      }
+    }
+    for (const img of [...gSatHigh.children]) {
+      if (!want.has(img.dataset.key)) img.remove();
+      else want.delete(img.dataset.key);
+    }
+    for (const k of want) {
+      const [l, key] = k.split('/');
+      gSatHigh.append(satTile(levels[Number(l)], Number(l), key));
+    }
+  }
+
+  function setSatellite(on, remember = false) {
+    satOn = satellite && on;
+    el.classList.toggle('wm-sat', satOn);
+    styleBtns?.querySelectorAll('button').forEach((b) =>
+      b.setAttribute('aria-pressed', String((b.dataset.style === 'satellite') === satOn)));
+    if (remember) {
+      try {
+        localStorage.setItem(STYLE_KEY, satOn ? 'satellite' : 'plan');
+      } catch {
+        /* preference only */
+      }
+    }
+    if (!satOn) {
+      clear(gSatLow);
+      clear(gSatHigh);
+      return;
+    }
+    getSatellite().then((m) => {
+      satManifest = m;
+      updateSatellite();
+    });
+  }
+  setSatellite(satOn);
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      updateSatellite();
+      drawOverlays();
+    }).observe(svg);
+  }
+
+  // ---------------------------------------------------------------- view box
+  function applyVB() {
+    svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    drawOverlays();
+    updateSatellite();
+  }
+
+  function clampVB() {
+    vb.w = Math.min(full.w, Math.max(full.w / MAX_ZOOM, vb.w));
+    vb.h = vb.w * (full.h / full.w);
+    vb.x = Math.min(full.x + full.w - vb.w, Math.max(full.x, vb.x));
+    vb.y = Math.min(full.y + full.h - vb.h, Math.max(full.y, vb.y));
+  }
+
+  function zoomAt(px, py, f) {
+    const w = Math.min(full.w, Math.max(full.w / MAX_ZOOM, vb.w * f));
+    const k = w / vb.w;
+    vb = { x: px - (px - vb.x) * k, y: py - (py - vb.y) * k, w, h: vb.h * k };
+    clampVB();
+    applyVB();
+  }
+
+  function zoomCenter(f) {
+    zoomAt(vb.x + vb.w / 2, vb.y + vb.h / 2, f);
+  }
+
+  function reset() {
+    vb = { ...full };
+    applyVB();
+  }
+
+  /** SVG units per CSS pixel. */
+  function unitsPerPx() {
+    const r = svg.getBoundingClientRect();
+    return r.width ? Math.max(vb.w / r.width, vb.h / r.height) : vb.w / 800;
+  }
+
+  function clientToSvg(cx, cy) {
+    const r = svg.getBoundingClientRect();
+    const u = unitsPerPx();
+    // preserveAspectRatio "meet": content is centred in the element
+    const offX = (r.width - vb.w / u) / 2;
+    const offY = (r.height - vb.h / u) / 2;
+    return [vb.x + (cx - r.left - offX) * u, vb.y + (cy - r.top - offY) * u];
+  }
+
+  // ------------------------------------------------------------ interaction
+  const pointers = new Map();
+  let drag = null;
+  let pinch = null;
+
+  svg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const [x, y] = clientToSvg(e.clientX, e.clientY);
+    zoomAt(x, y, e.deltaY < 0 ? 0.8 : 1.25);
+  }, { passive: false });
+
+  svg.addEventListener('pointerdown', (e) => {
+    try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic or already released pointer */ }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) {
+      drag = { x: e.clientX, y: e.clientY, vb: { ...vb }, moved: false };
+    } else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), w: vb.w };
+      drag = null;
+    }
+  });
+
+  svg.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const [mx, my] = clientToSvg((a.x + b.x) / 2, (a.y + b.y) / 2);
+      zoomAt(mx, my, (pinch.w * (pinch.dist / d)) / vb.w);
+      return;
+    }
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true;
+    el.classList.add('wm-dragging');
+    const u = unitsPerPx();
+    vb = { ...drag.vb, x: drag.vb.x - dx * u, y: drag.vb.y - dy * u };
+    clampVB();
+    applyVB();
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (drag && !drag.moved && e.type === 'pointerup' && interactive && onPick) {
+      const [x, y] = clientToSvg(e.clientX, e.clientY);
+      const ll = equalEarthInverse(x / K, -y / K);
+      if (ll) onPick({ lon: ll[0], lat: ll[1] });
+    }
+    if (pointers.size === 0) {
+      drag = null;
+      el.classList.remove('wm-dragging');
+    }
+  }
+  svg.addEventListener('pointerup', endPointer);
+  svg.addEventListener('pointercancel', endPointer);
+
+  // --------------------------------------------------------------- overlays
+  function drawOverlays() {
+    clear(gOver);
+    const u = unitsPerPx();
+    for (const o of overlays) {
+      if (o.kind === 'bbox') {
+        const [w, so, e, n] = o.bbox;
+        const pts = [];
+        for (let i = 0; i <= 16; i++) pts.push([w + ((e - w) * i) / 16, n]);
+        for (let i = 0; i <= 16; i++) pts.push([e, n - ((n - so) * i) / 16]);
+        for (let i = 0; i <= 16; i++) pts.push([e - ((e - w) * i) / 16, so]);
+        for (let i = 0; i <= 16; i++) pts.push([w, so + ((n - so) * i) / 16]);
+        gOver.append(s('path', { class: 'wm-bbox', d: `${linePath(pts)}Z` }));
+      } else if (o.kind === 'line') {
+        const [x1, y1] = project(o.a.lon, o.a.lat);
+        const [x2, y2] = project(o.b.lon, o.b.lat);
+        gOver.append(s('line', { class: 'wm-line', x1, y1, x2, y2 }));
+      } else if (o.kind === 'marker') {
+        const [x, y] = project(o.lon, o.lat);
+        gOver.append(s('circle', { class: `wm-marker wm-marker-${o.style}`, cx: x, cy: y, r: (o.style === 'ring' ? 9 : 5.5) * u }));
+      }
+    }
+    if (cursor && interactive) {
+      const [x, y] = project(cursor.lon, cursor.lat);
+      gOver.append(s('circle', { class: 'wm-marker wm-marker-cursor', cx: x, cy: y, r: 10 * u }));
+    }
+  }
+
+  function setOverlays(list) {
+    overlays = list;
+    drawOverlays();
+  }
+
+  return {
+    el,
+    reset,
+    setInteractive(on) {
+      interactive = on;
+      el.classList.toggle('wm-interactive', on);
+      setKeyboard(on && Boolean(onPick));
+      drawOverlays();
+    },
+    /** overlays: [{kind:'marker', lat, lon, style:'guess'|'target'|'ring'}, {kind:'line', a, b}, {kind:'bbox', bbox}] */
+    setOverlays,
+    highlight(ids = [], cls = 'wm-hl') {
+      highlighted = { ids, cls };
+      for (const p of countryEls.values()) p.classList.remove('wm-hl', 'wm-hl2');
+      for (const id of ids) countryEls.get(id)?.classList.add(cls);
+    },
+    /** Frame a lon/lat box (w, s, e, n), with a minimum span so small areas keep context. */
+    focus(bbox, minSpanDeg = 30) {
+      let [w, so, e, n] = bbox;
+      const cx = (w + e) / 2;
+      const cy = (so + n) / 2;
+      const hw = Math.max((e - w) / 2, minSpanDeg / 2);
+      const hh = Math.max((n - so) / 2, minSpanDeg / 4);
+      w = cx - hw; e = cx + hw; so = cy - hh; n = cy + hh;
+      const pts = [[w, so], [w, n], [e, so], [e, n], [cx, so], [cx, n], [w, cy], [e, cy]].map(([lo, la]) =>
+        project(Math.max(-180, Math.min(180, lo)), Math.max(-89, Math.min(89, la))));
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const bw = Math.max(...xs) - Math.min(...xs);
+      const bh = Math.max(...ys) - Math.min(...ys);
+      const wv = Math.max(bw, bh * (full.w / full.h)) * 1.25;
+      vb = { x: (Math.min(...xs) + Math.max(...xs)) / 2 - wv / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 - (wv * full.h / full.w) / 2, w: wv, h: wv * full.h / full.w };
+      clampVB();
+      applyVB();
+    },
+  };
+}

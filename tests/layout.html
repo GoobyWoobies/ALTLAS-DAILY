@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>running</title>
+<style>body{margin:0;font:13px monospace} iframe{border:0;display:block;height:900px}</style>
+</head>
+<body>
+<pre id="out">running…</pre>
+<iframe id="app" title="app"></iframe>
+<script type="module">
+// Layout check: no screen may overflow horizontally at mobile and desktop widths.
+import { test, assert, run } from './harness.js';
+
+const frame = document.getElementById('app');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ROUTES = ['#/', '#/map-glitch', '#/terrain-id', '#/country-dna', '#/stats', '#/sources',
+  '#/map-glitch?play=free', '#/terrain-id?play=free', '#/country-dna?play=free', '#/map-glitch?play=place'];
+const WIDTHS = (new URLSearchParams(location.search).get('w') || '360,390,768,1280,1920').split(',').map(Number);
+
+async function load(hash, width) {
+  frame.style.width = `${width}px`;
+  frame.src = `../index.html?t=${Date.now()}${hash}`;
+  for (let i = 0; i < 200; i++) {
+    await sleep(50);
+    const d = frame.contentDocument;
+    if (d?.readyState === 'complete' && d.querySelector('#main') && !d.querySelector('.loading')) break;
+  }
+  await sleep(400);
+}
+
+function offenders(width) {
+  const d = frame.contentDocument;
+  const out = [];
+  for (const el of d.querySelectorAll('body *')) {
+    const r = el.getBoundingClientRect();
+    if (r.width && r.right > width + 1 && !el.closest('.zi-layer, .wm-svg, .site-nav')) {
+      out.push(`${el.tagName.toLowerCase()}.${[...el.classList].join('.')} right=${Math.round(r.right)}`);
+    }
+  }
+  return out;
+}
+
+for (const w of WIDTHS) {
+  for (const route of ROUTES) {
+    test(`${w}px ${route}`, async () => {
+      await load(route, w);
+      const d = frame.contentDocument;
+      const sw = d.documentElement.scrollWidth;
+      const bad = offenders(w);
+      assert(sw <= w && bad.length === 0, `scrollWidth ${sw}; ${bad.slice(0, 4).join(' | ')}`);
+    });
+  }
+}
+run();
+</script>
+</body>
+</html>

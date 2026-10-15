@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>visual</title>
+<style>html,body{margin:0;background:#888}iframe{border:0;display:block;background:#fff}</style>
+</head>
+<body>
+<!-- Visual review helper: visual.html?s=<scenario>&w=1440&h=900 drives the real UI
+     into a given state (wrong answer, reveal, results…) for a screenshot.
+     Uses (and clears) local storage of this origin. -->
+<iframe id="app" title="app"></iframe>
+<script type="module">
+import { utcDateKey, dailySeed } from '../assets/js/core/daily.js';
+import { equalEarth } from '../assets/js/core/geo.js';
+import * as MG from '../assets/js/games/mapglitch/rules.js';
+import * as TR from '../assets/js/games/terrain/rules.js';
+import * as DNA from '../assets/js/games/dna/rules.js';
+
+const q = new URLSearchParams(location.search);
+const frame = document.getElementById('app');
+frame.style.width = `${q.get('w') || 1440}px`;
+frame.style.height = `${q.get('h') || 900}px`;
+const today = utcDateKey();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const $ = (s) => frame.contentDocument.querySelector(s);
+const $$ = (s) => [...frame.contentDocument.querySelectorAll(s)];
+async function waitFor(fn) { for (let i = 0; i < 300; i++) { const v = fn(); if (v) return v; await sleep(40); } throw new Error('timeout'); }
+async function open(hash) {
+  frame.src = `../index.html?t=${Date.now()}${hash}`;
+  await waitFor(() => frame.contentDocument?.readyState === 'complete' && $('.site-header'));
+}
+const W = () => frame.contentWindow;
+const click = (el) => el.dispatchEvent(new (W().MouseEvent)('click', { bubbles: true }));
+const button = (t) => $$('button').find((b) => b.textContent.includes(t) && !b.disabled);
+async function answer(name) {
+  const input = await waitFor(() => $('.ci-input:not([disabled])'));
+  input.value = name;
+  input.dispatchEvent(new (W().Event)('input', { bubbles: true }));
+  input.dispatchEvent(new (W().KeyboardEvent)('keydown', { key: 'Enter', bubbles: true }));
+  await sleep(50);
+}
+async function next() { click(await waitFor(() => button('suivante') || button('Voir le résultat'))); await sleep(50); }
+function clickMap(sel, lat, lon) {
+  const svg = $(sel); const vb = svg.viewBox.baseVal; const r = svg.getBoundingClientRect();
+  const u = Math.max(vb.width / r.width, vb.height / r.height);
+  const [px, py] = equalEarth(lon, lat);
+  const x = r.left + (r.width - vb.width / u) / 2 + (px * 100 - vb.x) / u;
+  const y = r.top + (r.height - vb.height / u) / 2 + (-py * 100 - vb.y) / u;
+  const P = W().PointerEvent;
+  svg.dispatchEvent(new P('pointerdown', { bubbles: true, pointerId: 3, clientX: x, clientY: y }));
+  svg.dispatchEvent(new P('pointerup', { bubbles: true, pointerId: 3, clientX: x, clientY: y }));
+}
+
+const countries = await (await fetch('../data/countries.json')).json();
+const places = await (await fetch('../data/terrain/places.json')).json();
+const name = (id) => countries.find((c) => c.id === id).name;
+localStorage.removeItem('atlas-daily:v1');
+const s = q.get('s');
+
+if (s.startsWith('mg')) {
+  const rounds = MG.buildRounds(countries, dailySeed(MG.GAME_ID, today));
+  await open('#/map-glitch?play=daily');
+  await waitFor(() => $('.mg-sil path'));
+  if (s === 'mg-results') {
+    for (const [i, r] of rounds.entries()) { if (i % 4 === 1) await answer(name(rounds[(i + 1) % 10].id)); await answer(name(r.id)); await next(); }
+  } else {
+    const r = rounds[0];
+    await answer(countries.find((c) => c.id !== r.id && c.continent !== 'Europe').name);
+    if (s === 'mg-reveal') await answer(name(r.id));
+  }
+} else if (s.startsWith('tr')) {
+  const rounds = TR.buildRounds(places, dailySeed(TR.GAME_ID, today));
+  await open('#/terrain-id?play=daily');
+  await waitFor(() => $('.tr-map path.wm-land'));
+  const p = places.find((x) => x.id === rounds[0].id);
+  click(button('Indice 1'));
+  if (s === 'tr-reveal') {
+    clickMap('.tr-map .wm-svg', p.bbox[1] - 4, p.bbox[0] - 6);
+    click(await waitFor(() => button('Valider')));
+  }
+} else if (s.startsWith('dna')) {
+  const rounds = DNA.buildRounds(countries, dailySeed(DNA.GAME_ID, today));
+  await open('#/country-dna?play=daily');
+  await waitFor(() => $('.dna-card'));
+  const t = rounds[0].id;
+  for (const g of ['BRA', 'DEU', 'EGY'].filter((x) => x !== t)) await answer(name(g));
+  if (s === 'dna-reveal') await answer(name(t));
+}
+await sleep(900);
+document.title = 'ready';
+</script>
+</body>
+</html>

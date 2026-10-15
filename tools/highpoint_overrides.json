@@ -1,0 +1,17 @@
+{
+  "_doc": "Corrections applied on top of the Wikidata export (tools/raw/wikidata_highpoints.json). Convention: highest point of the main territory, consistent with the mledoze areas (e.g. Australia without Heard Island, Netherlands without the Caribbean islands, Denmark without Greenland). Sources: CIA World Factbook / national survey values.",
+  "AUS": { "name": "mont Kosciuszko", "elev": 2228, "reason": "Wikidata gives Mawson Peak (Heard Island, external territory)" },
+  "NLD": { "name": "Vaalserberg", "elev": 322, "reason": "Wikidata gives Mount Scenery (Saba, Caribbean Netherlands)" },
+  "AZE": { "name": "Bazardüzü", "elev": 4466, "reason": "Wikidata has conflicting 2706 m statement" },
+  "CHN": { "name": "Everest", "elev": 8849, "reason": "2020 joint survey 8848.86 m; Wikidata max picks an outdated 8850" },
+  "NPL": { "name": "Everest", "elev": 8849, "reason": "2020 joint survey 8848.86 m" },
+  "FRA": { "name": "mont Blanc", "elev": 4806, "reason": "2021 survey 4805.59 m; Wikidata lists several yearly surveys" },
+  "ITA": { "name": "mont Blanc", "elev": 4806, "reason": "same summit as FRA" },
+  "GMB": { "name": "point non nommé", "elev": 53, "reason": "missing on Wikidata; CIA Factbook 'unnamed elevation 53 m'" },
+  "SEN": { "name": "point non nommé près de Nepen Diakha", "elev": 648, "reason": "CIA Factbook value; Wikidata gives a lower cliff" },
+  "KWT": { "name": "point non nommé", "elev": 306, "reason": "CIA Factbook 'unnamed elevation 306 m'" },
+  "SWE": { "name": "Kebnekaise", "elev": 2097, "reason": "southern glacier peak melted below the northern rock peak (2096.8 m)" },
+  "IRN": { "name": "mont Damavand", "elev": 5610, "reason": "commonly accepted value; Wikidata max picks 5628" },
+  "EGY": { "name": "mont Sainte-Catherine", "elev": 2629, "reason": "commonly accepted value" },
+  "SMR": { "name": "mont Titano", "elev": 739, "reason": "commonly accepted value" }
+}
