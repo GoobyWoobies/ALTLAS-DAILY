@@ -29,9 +29,12 @@ const win = () => frame.contentWindow;
 const $ = (sel) => doc().querySelector(sel);
 const $$ = (sel) => [...doc().querySelectorAll(sel)];
 
+let loads = 0;
 async function open(hash) {
-  frame.src = `../index.html?t=${Date.now()}${hash}`;
-  await waitFor(() => doc()?.readyState === 'complete' && $('.site-header'), `page ${hash}`);
+  const mark = `t=${Date.now()}-${++loads}`;
+  frame.src = `../index.html?${mark}${hash}`;
+  // wait for the new document: the previous one stays "complete" until the navigation commits
+  await waitFor(() => doc()?.URL.includes(mark) && doc().readyState === 'complete' && $('.site-header'), `page ${hash}`);
   win().addEventListener('error', (e) => errors.push(`${hash}: ${e.message}`));
   win().addEventListener('unhandledrejection', (e) => errors.push(`${hash}: ${e.reason}`));
 }
@@ -90,7 +93,12 @@ test('setup', async () => {
   places = await (await fetch('../data/terrain/places.json')).json();
   localStorage.removeItem('atlas-daily:v1');
   await open('#/');
-  eq($$('.game-row').length, 3, 'three games on the home page');
+  eq($$('.game-card').length, 3, 'three games on the home page');
+  for (const card of $$('.game-card')) {
+    const play = card.querySelector('.btn-primary');
+    assert(play && /\?play=daily$/.test(play.getAttribute('href')), 'each game has a direct "play" action');
+    assert(play.textContent.includes('Jouer le défi du jour'), `play label: ${play.textContent}`);
+  }
 });
 
 // -------------------------------------------------------------- map glitch
@@ -342,6 +350,105 @@ test('stats page reflects the games', async () => {
   const blocks = $$('.stat-block');
   eq(blocks.length, 4);
   assert(blocks[1].textContent.includes('Défi du'), 'terrain history listed');
+});
+
+// ------------------------------------------------- pages, help, robustness
+test('rules page: every game, deep link to one game', async () => {
+  await open('#/regles?jeu=terrain-id');
+  const sections = await waitFor(() => $$('.rules-game').length === 3 && $$('.rules-game'), 'rules sections');
+  for (const sec of sections) {
+    assert(sec.querySelector('.help-goal'), 'objective shown');
+    assert(sec.querySelectorAll('.steps li').length >= 3, 'steps listed');
+    assert(sec.querySelector('.help-points'), 'points listed');
+  }
+  await sleep(100);
+  const top = $('#regles-terrain-id').getBoundingClientRect().top;
+  assert(top < 200, `deep link scrolls to Terrain ID (top=${Math.round(top)})`);
+});
+
+test('every internal link of the header and footer leads to a real page', async () => {
+  await open('#/');
+  const hrefs = [...new Set($$('.site-header a, .site-footer a').map((a) => a.getAttribute('href')))];
+  for (const want of ['#/regles', '#/mentions-legales', '#/confidentialite', '#/sources', '#/stats']) {
+    assert(hrefs.includes(want), `link ${want}`);
+  }
+  assert($('.footer-legal').textContent.includes(`© ${new Date().getFullYear()}`), 'current year in the footer');
+  assert($('.footer-legal').textContent.includes('GoobyWoobies'), 'author in the footer');
+  for (const href of hrefs.filter((x) => x.startsWith('#/'))) {
+    await open(href);
+    await waitFor(() => $('#main h1'), `title of ${href}`);
+    assert(!$('#main').textContent.includes('Cette page n\'existe pas'), `${href} is not a 404`);
+  }
+  await open('#/nulle-part');
+  const h404 = (await waitFor(() => $('#main h1'), '404 title')).textContent;
+  assert(h404.includes('n\'existe pas'), `unknown route shows a 404 page (h1: ${h404}, url: ${doc().URL})`);
+});
+
+test('rules can be read during a game without leaving it', async () => {
+  await open('#/country-dna?play=free');
+  click(await waitFor(() => $('.gf-help'), 'rules button in the game bar'));
+  const dlg = await waitFor(() => $('dialog.help-dialog[open]'), 'rules dialog');
+  assert(dlg.textContent.includes('Country DNA'), 'rules of the current game');
+  click(dlg.querySelector('.dialog-close'));
+  await waitFor(() => !$('dialog.help-dialog'), 'dialog closed');
+  assert($('.gf-bar'), 'still in the game');
+});
+
+test('relief map data: manifest and every listed tile are served', async () => {
+  const base = '../data/relief/';
+  const r = await fetch(`${base}manifest.json`);
+  eq(r.status, 200, 'manifest');
+  const m = await r.json();
+  eq(m.levels.length, 4, 'four zoom levels');
+  const missing = [];
+  for (const [li, L] of m.levels.entries()) {
+    for (const key of L.tiles) {
+      const t = await fetch(`${base}${li}/${key}.webp`, { method: 'HEAD' });
+      if (!t.ok) missing.push(`${li}/${key}`);
+    }
+  }
+  eq(missing, [], 'missing tiles');
+});
+
+test('a failed data load shows a retry, then the game starts', async () => {
+  await open('#/terrain-id');
+  const realFetch = win().fetch;
+  let block = true;
+  win().fetch = (url, ...rest) => (block && String(url).includes('places.json')
+    ? Promise.resolve(new (win().Response)('', { status: 503 }))
+    : realFetch.call(win(), url, ...rest));
+  click(await waitFor(() => $('[data-action="free"]'), 'free button'));
+  const box = await waitFor(() => $('.error-box'), 'error message').catch((e) => {
+    throw new Error(`${e.message}; main: ${$('#main').textContent.slice(0, 160)}; fetch patched: ${win().fetch !== realFetch}`);
+  });
+  assert(box.textContent.includes('n\'a pas pu démarrer'), 'understandable message');
+  assert(!$('[data-action="free"]').disabled, 'start buttons usable again');
+  block = false;
+  click(button('Réessayer'));
+  await waitFor(() => $('.tr-map .wm'), 'game started after retry');
+  win().fetch = realFetch;
+});
+
+test('a missing relief background falls back to the plan map, once, without errors', async () => {
+  await open('#/terrain-id');
+  const realFetch = win().fetch;
+  let calls = 0;
+  win().fetch = (url, ...rest) => {
+    if (String(url).includes('relief/manifest.json')) {
+      calls += 1;
+      return Promise.resolve(new (win().Response)('', { status: 404 }));
+    }
+    return realFetch.call(win(), url, ...rest);
+  };
+  click(await waitFor(() => $('[data-action="free"]'), 'free button'));
+  const map = await waitFor(() => $('.tr-map .wm'), 'map');
+  const notice = await waitFor(() => map.querySelector('.wm-notice:not([hidden])'), 'notice on the map');
+  assert(notice.textContent.includes('relief indisponible'), 'reason given');
+  assert(!map.classList.contains('wm-relief'), 'plan map shown');
+  assert(map.querySelector('[data-style="relief"]').disabled, 'relief option disabled');
+  eq($$('.error-box').length, 0, 'no page-level error');
+  eq(calls, 1, 'one request');
+  win().fetch = realFetch;
 });
 
 test('no runtime errors', async () => {

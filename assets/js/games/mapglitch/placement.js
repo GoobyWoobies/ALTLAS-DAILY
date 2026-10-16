@@ -5,7 +5,7 @@ import { getCountries, getShapes, getWorld } from '../../core/data.js';
 import { createSession } from '../../core/session.js';
 import { createWorldMap } from '../../ui/worldMap.js';
 import { createSilhouette } from '../../ui/silhouette.js';
-import { createFrame, renderResults } from '../../ui/screens.js';
+import { createFrame, renderResults, launch } from '../../ui/screens.js';
 import { distanceToPolygonsKm } from '../../core/geo.js';
 import { formatInt } from '../../core/text.js';
 import {
@@ -16,11 +16,12 @@ import {
 const TITLE = 'Map Glitch · placement';
 
 export async function playPlacement(root) {
-  root.append(h('p', { class: 'loading' }, 'Chargement des données…'));
   const [countries, shapes, world] = await Promise.all([getCountries(), getShapes(), getWorld()]);
   const polys = new Map();
   for (const f of world) if (f.id) polys.set(f.id, [...(polys.get(f.id) || []), ...f.p]);
-  const session = createSession(PLACE_GAME_ID, 'free', (seed) => buildPlacementRounds(countries.list, seed), PLACE_ROUNDS * PLACE_MAX);
+  // only countries drawn on the map can be placed (Monaco and Nauru are too small to have an outline)
+  const placeable = countries.list.filter((c) => polys.has(c.id));
+  const session = createSession(PLACE_GAME_ID, 'free', (seed) => buildPlacementRounds(placeable, seed), PLACE_ROUNDS * PLACE_MAX);
   const frame = createFrame(root, { title: TITLE, session });
   const ctx = { root, frame, session, countries, shapes, polys };
   round(ctx);
@@ -110,6 +111,6 @@ function showResults(ctx) {
       sub: r.km === 0 ? 'dans le pays' : `${formatInt(r.km)} km`,
       points: r.score,
     })),
-    onReplay: () => playPlacement(root),
+    onReplay: () => launch(root, () => playPlacement(root)),
   });
 }

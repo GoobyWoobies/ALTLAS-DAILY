@@ -3,11 +3,13 @@ import { h, s, clear, icon } from './ui/dom.js';
 import * as mapGlitch from './games/mapglitch/view.js';
 import * as terrain from './games/terrain/view.js';
 import * as dna from './games/dna/view.js';
-import { dailyStatus } from './core/session.js';
 import { gameStats, resetAll } from './core/storage.js';
 import { utcDateKey, formatDateKey, msUntilNextDaily } from './core/daily.js';
 import { formatInt } from './core/text.js';
-import { formatCountdown } from './ui/screens.js';
+import { SITE, AUTHOR } from './core/site.js';
+import { formatCountdown, dailyAction } from './ui/screens.js';
+import { rulesPage } from './pages/rules.js';
+import { legalNotice, privacy } from './pages/legal.js';
 
 const GAMES = [
   {
@@ -29,20 +31,42 @@ const GAMES = [
 
 const app = document.getElementById('app');
 
+function brand() {
+  return h('a', { class: 'brand', href: '#/', 'aria-label': `${SITE}, accueil` }, 'ATLAS', h('span', { class: 'brand-sep' }, '//'), 'DAILY');
+}
+
 function nav(active) {
+  const link = (route, label, cls = '') => h('a', {
+    href: `#/${route}`, class: `${cls}${active === route ? ' active' : ''}`.trim() || null, 'aria-current': active === route ? 'page' : null,
+  }, label);
   return h('header', { class: 'site-header' },
     h('div', { class: 'wrap header-inner' },
-      h('a', { class: 'brand', href: '#/' }, 'ATLAS', h('span', { class: 'brand-sep' }, '//'), 'DAILY'),
+      brand(),
       h('nav', { class: 'site-nav', 'aria-label': 'Navigation principale' },
-        GAMES.map((g) => h('a', { href: `#/${g.route}`, class: active === g.route ? 'active' : '', 'aria-current': active === g.route ? 'page' : null }, g.name)),
-        h('a', { href: '#/stats', class: active === 'stats' ? 'active' : '', 'aria-current': active === 'stats' ? 'page' : null }, 'Statistiques'))));
+        GAMES.map((g) => link(g.route, g.name)),
+        h('span', { class: 'nav-sep', 'aria-hidden': 'true' }),
+        link('regles', 'Règles', 'nav-secondary'),
+        link('stats', 'Statistiques', 'nav-secondary'))));
 }
 
 function footer() {
+  const year = new Date().getFullYear();
+  const col = (title, ...links) => h('div', { class: 'footer-col' },
+    h('h2', { class: 'footer-h' }, title),
+    h('ul', null, links.map(([href, label]) => h('li', null, h('a', { href }, label)))));
   return h('footer', { class: 'site-footer' },
-    h('div', { class: 'wrap footer-inner' },
-      h('span', null, 'ATLAS//DAILY · défis quotidiens à minuit UTC'),
-      h('a', { href: '#/sources' }, 'Sources et licences des données')));
+    h('div', { class: 'wrap' },
+      h('div', { class: 'footer-grid' },
+        h('div', { class: 'footer-about' },
+          brand(),
+          h('p', null, 'Jeux de géographie quotidiens. Un nouveau défi chaque jour à minuit UTC, sans compte.')),
+        col('Jeux', ...GAMES.map((g) => [`#/${g.route}`, g.name])),
+        col('Aide', ['#/regles', 'Règles du jeu'], ['#/stats', 'Statistiques'], ['#/sources', 'Sources et licences']),
+        col('Informations légales', ['#/mentions-legales', 'Mentions légales'], ['#/confidentialite', 'Confidentialité'])),
+      h('div', { class: 'footer-legal' },
+        h('p', null, `© ${year} ${SITE} — Créé par ${AUTHOR}. Tous droits réservés sur les éléments originaux du site.`),
+        h('p', null, 'Données cartographiques tierces sous leur propre licence (Natural Earth, mledoze/countries, Wikidata, Terrain Tiles) : ',
+          h('a', { href: '#/sources' }, 'voir les sources'), '.'))));
 }
 
 // Line glyphs for the game list (drawn, not emoji).
@@ -71,35 +95,43 @@ function glyph(id) {
 
 function home(view) {
   const today = utcDateKey();
-  const done = GAMES.filter((g) => dailyStatus(g.id, today).state === 'done').length;
+  const actions = GAMES.map((g) => dailyAction(g.id, today));
+  const done = actions.filter((a) => a.st.state === 'done').length;
   view.append(
     h('section', { class: 'home-hero' },
       h('div', null,
         h('p', { class: 'kicker' }, 'Jeux de géographie quotidiens'),
         h('h1', { class: 'home-title' }, 'Trois façons de lire le monde, un nouveau défi chaque jour.'),
-        h('p', { class: 'lede' }, 'Silhouettes de pays déformées, reliefs sans nom, fiches d\'identité géographique. Données cartographiques réelles, sans compte.')),
-      h('div', { class: 'home-coords' },
+        h('p', { class: 'lede' }, 'Silhouettes de pays déformées, reliefs sans nom, fiches d\'identité géographique. Données cartographiques réelles, sans compte.'),
+        h('ul', { class: 'home-facts' },
+          h('li', null, icon('check', 14), 'Un défi par jeu, le même pour tous'),
+          h('li', null, icon('check', 14), 'Parties libres illimitées'),
+          h('li', null, icon('check', 14), 'Scores gardés sur cet appareil'))),
+      h('div', { class: 'home-coords', 'aria-label': 'Édition du jour' },
         h('div', null, 'Édition du ', h('strong', null, formatDateKey(today)), ' UTC'),
-        h('div', null, `Défis terminés : ${done} / ${GAMES.length}`),
+        h('div', null, 'Défis terminés : ', h('strong', null, `${done} / ${GAMES.length}`)),
         h('div', null, `Prochaine édition dans ${formatCountdown(msUntilNextDaily())}`))),
-    h('ol', { class: 'game-list' }, GAMES.map((g, i) => {
-      const st = dailyStatus(g.id, today);
-      const status = st.state === 'done'
-        ? h('span', { class: 'status done' }, icon('check', 14), `Défi terminé · ${formatInt(st.score)} / ${formatInt(st.max)}`)
-        : st.state === 'progress'
-          ? h('span', { class: 'status' }, `Défi en cours · manche ${st.round + 1}`)
-          : h('span', { class: 'status' }, 'Défi du jour disponible');
-      return h('li', { class: 'game-row' },
-        h('a', { class: 'game-link', href: `#/${g.route}` },
-          h('span', { class: 'game-num' }, String(i + 1).padStart(2, '0')),
+    h('h2', { class: 'section-title home-section' }, 'Choisir un jeu'),
+    h('ul', { class: 'game-grid' }, GAMES.map((g, i) => {
+      const a = actions[i];
+      const status = a.st.state === 'done'
+        ? h('span', { class: 'badge badge-ok' }, icon('check', 12), `Terminé · ${formatInt(a.st.score)} / ${formatInt(a.st.max)}`)
+        : a.st.state === 'progress'
+          ? h('span', { class: 'badge badge-progress' }, `En cours · manche ${a.st.round + 1}`)
+          : h('span', { class: 'badge' }, 'Défi du jour disponible');
+      return h('li', { class: 'game-card' },
+        h('div', { class: 'game-card-head' },
           glyph(g.id),
-          h('span', { class: 'game-main' },
-            h('span', { class: 'game-name' }, g.name),
-            h('span', { class: 'game-desc' }, g.desc)),
-          h('span', { class: 'game-meta' }, h('span', { class: 'game-format' }, g.format), status),
-          h('span', { class: 'game-go' }, icon('arrow', 18))));
+          h('span', { class: 'game-num' }, String(i + 1).padStart(2, '0'))),
+        h('h3', { class: 'game-name' }, h('a', { href: `#/${g.route}` }, g.name)),
+        h('p', { class: 'game-desc' }, g.desc),
+        h('p', { class: 'game-format' }, g.format),
+        status,
+        h('div', { class: 'game-actions' },
+          h('a', { class: 'btn btn-primary btn-wide', href: `#/${g.route}?play=daily` }, a.label, icon('arrow')),
+          h('a', { class: 'btn btn-secondary btn-wide', href: `#/${g.route}` }, 'Partie libre et règles')));
     })),
-    h('p', { class: 'note home-note' }, 'Vos scores et vos séries restent sur cet appareil. ', h('a', { href: '#/stats' }, 'Voir les statistiques')),
+    h('p', { class: 'note home-note' }, 'Nouveau ? Commencez par les ', h('a', { href: '#/regles' }, 'règles du jeu'), '. Vos scores et vos séries restent sur cet appareil : ', h('a', { href: '#/stats' }, 'voir les statistiques'), '.'),
   );
 }
 
@@ -135,7 +167,7 @@ function stats(view) {
         h('button', {
           class: 'btn btn-ghost', type: 'button',
           onClick: () => {
-            if (window.confirm('Effacer toutes les statistiques et les défis enregistrés sur cet appareil ?')) {
+            if (window.confirm('Effacer toutes les statistiques, les défis et les préférences enregistrés sur cet appareil ?')) {
               resetAll();
               render();
             }
@@ -171,31 +203,63 @@ function sources(view) {
         h('li', null, 'Le défi du jour change à minuit UTC. Le contenu et l\'ordre des manches sont déterminés par la date.'))));
 }
 
+function notFound(view) {
+  view.append(
+    h('section', { class: 'page' },
+      h('p', { class: 'kicker' }, 'Erreur 404'),
+      h('h1', { class: 'page-title' }, 'Cette page n\'existe pas'),
+      h('p', { class: 'lede' }, 'Le lien suivi est peut-être ancien ou incomplet.'),
+      h('div', { class: 'actions' },
+        h('a', { class: 'btn btn-primary', href: '#/' }, 'Retour à l\'accueil', icon('arrow')),
+        h('a', { class: 'btn btn-secondary', href: '#/regles' }, 'Règles du jeu'))));
+}
+
 const ROUTES = {
   '': { render: home },
-  stats: { render: stats },
-  sources: { render: sources },
+  regles: { render: rulesPage, title: 'Règles du jeu' },
+  stats: { render: stats, title: 'Statistiques' },
+  sources: { render: sources, title: 'Sources et licences' },
+  'mentions-legales': { render: legalNotice, title: 'Mentions légales' },
+  confidentialite: { render: privacy, title: 'Confidentialité' },
   ...Object.fromEntries(GAMES.map((g) => [g.route, { render: (v, q) => g.module.mount(v, q.get('play'), q), title: g.name }])),
 };
 
 function render() {
   const [key, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
-  const route = ROUTES[key] || ROUTES[''];
-  const view = h('main', { class: 'wrap view', id: 'main' });
+  const route = ROUTES[key] || { render: notFound, title: 'Page introuvable' };
+  const view = h('main', { class: 'wrap view', id: 'main', tabindex: '-1' });
+  // leaving a screen must not leave the page locked behind an enlarged map or an open dialog
+  document.documentElement.classList.remove('wm-lock');
+  document.querySelectorAll('dialog.help-dialog').forEach((d) => d.remove());
   clear(app).append(nav(key), view, footer());
-  document.title = route.title ? `${route.title} — ATLAS//DAILY` : 'ATLAS//DAILY — jeux de géographie quotidiens';
+  document.title = route.title ? `${route.title} — ${SITE}` : `${SITE} — jeux de géographie quotidiens`;
   window.scrollTo(0, 0);
   try {
     route.render(view, new URLSearchParams(query));
   } catch (err) {
-    view.append(h('p', { class: 'error' }, 'Une erreur est survenue : ', String(err.message || err)));
+    showError(err);
     throw err;
   }
 }
 
-window.addEventListener('hashchange', render);
-window.addEventListener('unhandledrejection', (e) => {
+// Last-resort error display: one message per distinct error, with a way out,
+// instead of a new line for every failed promise.
+const shown = new Set();
+function showError(err) {
+  const msg = String(err?.message || err || 'erreur inconnue');
   const view = document.getElementById('main');
-  view?.append(h('p', { class: 'error' }, 'Erreur de chargement : ', String(e.reason?.message || e.reason)));
+  if (!view || shown.has(msg)) return;
+  shown.add(msg);
+  view.prepend(h('div', { class: 'error-box', role: 'alert' },
+    h('p', { class: 'error-title' }, 'Une erreur est survenue.'),
+    h('p', null, 'Une partie du site n\'a pas pu s\'afficher. Rechargez la page ; si le problème continue, vérifiez votre connexion.'),
+    h('p', { class: 'note mono' }, msg),
+    h('div', { class: 'actions' }, h('button', { class: 'btn btn-primary', type: 'button', onClick: () => window.location.reload() }, 'Recharger la page'))));
+}
+
+window.addEventListener('hashchange', () => {
+  shown.clear();
+  render();
 });
+window.addEventListener('unhandledrejection', (e) => showError(e.reason));
 render();

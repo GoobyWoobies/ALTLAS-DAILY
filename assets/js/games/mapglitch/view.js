@@ -5,11 +5,10 @@ import { createSession } from '../../core/session.js';
 import { countryInput } from '../../ui/countryInput.js';
 import { createSilhouette } from '../../ui/silhouette.js';
 import { createWorldMap } from '../../ui/worldMap.js';
-import { renderIntro, createFrame, renderResults } from '../../ui/screens.js';
+import { renderIntro, createFrame, renderResults, launch } from '../../ui/screens.js';
 import { playPlacement } from './placement.js';
-import { formatInt } from '../../core/text.js';
 import {
-  GAME_ID, ROUND_PLAN, MAX_ATTEMPTS, DIFFICULTY_LABEL, TRANSFORM_LABEL, BASE_POINTS,
+  GAME_ID, MAX_ATTEMPTS, DIFFICULTY_LABEL, TRANSFORM_LABEL,
   buildRounds, roundScore, maxScore, intensityAfter, prepareShape, applyGlitch, resultSymbol,
 } from './rules.js';
 
@@ -18,31 +17,24 @@ const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)
 
 /** autostart: 'daily' | 'free' (| 'place' for Map Glitch) from a #/route?play= link */
 export function mount(root, autostart = null) {
+  const start = (mode) => launch(root, () => play(root, mode));
+  const place = () => launch(root, () => playPlacement(root));
   renderIntro(root, {
     game: GAME_ID,
-    title: TITLE,
-    lede: 'Une silhouette de pays, réelle mais déformée. Retrouvez le pays d\'origine.',
-    rules: [
-      'Chaque manche montre le contour d\'un pays, déformé par une à trois transformations : rotation, miroir, étirement, ondulation, torsion…',
-      'Vous avez trois essais. Chaque erreur répare une partie de la déformation et révèle un indice de localisation.',
-      `Points : ${BASE_POINTS[1]} (facile), ${BASE_POINTS[2]} (moyen) ou ${BASE_POINTS[3]} (difficile), multipliés par 100 %, 60 % ou 30 % selon l'essai.`,
-      'La difficulté augmente au fil des dix manches : pays moins connus, déformations plus fortes.',
-    ],
-    meta: `${ROUND_PLAN.length} manches · ${formatInt(maxScore())} points maximum`,
-    onStart: (mode) => play(root, mode),
+    onStart: start,
     extras: [{
       id: 'place',
-      label: 'Mode placement',
-      note: 'Mode complémentaire : replacez des pays sur une carte sans frontières.',
-      onClick: () => playPlacement(root),
+      title: 'Mode placement',
+      label: 'Lancer le mode placement',
+      note: 'Mode complémentaire : un pays est nommé, placez-le sur une carte sans frontières.',
+      onClick: place,
     }],
   });
-  if (autostart === 'daily' || autostart === 'free') play(root, autostart);
-  else if (autostart === 'place') playPlacement(root);
+  if (autostart === 'daily' || autostart === 'free') start(autostart);
+  else if (autostart === 'place') place();
 }
 
 async function play(root, mode) {
-  root.append(h('p', { class: 'loading' }, 'Chargement des données…'));
   const [countries, shapes] = await Promise.all([getCountries(), getShapes()]);
   const session = createSession(GAME_ID, mode, (seed) => buildRounds(countries.list, seed), maxScore());
   if (session.done) return showResults(root, session, countries);
@@ -233,6 +225,6 @@ function showResults(root, session, countries) {
       sub: `${DIFFICULTY_LABEL[r.difficulty]} · ${r.solved ? `trouvé au ${r.attempts === 1 ? '1er' : `${r.attempts}e`} essai` : 'non trouvé'}`,
       points: r.score,
     })),
-    onReplay: () => play(root, 'free'),
+    onReplay: () => launch(root, () => play(root, 'free')),
   });
 }

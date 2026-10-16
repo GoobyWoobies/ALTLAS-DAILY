@@ -33,10 +33,16 @@ function saveState(s) {
   }
 }
 
+/** Erase everything the site stored on this device: games, statistics and preferences. */
 export function resetAll() {
   memory = null;
   try {
-    localStorage.removeItem(KEY);
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('atlas-daily:')) keys.push(k);
+    }
+    keys.forEach((k) => localStorage.removeItem(k));
   } catch {
     /* ignore */
   }

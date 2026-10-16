@@ -51,8 +51,12 @@ Les tests s'exécutent dans le navigateur, serveur local lancé :
   intégrité des données, validité de 366 défis quotidiens.
 - `http://localhost:8080/tests/e2e.html` : joue réellement le défi du jour des trois
   jeux dans une iframe (saisie, Entrée, clics sur la carte) et vérifie scores,
-  sauvegardes et reprise. Ce test **efface les données locales** de l'origine
-  `localhost`.
+  sauvegardes et reprise. Vérifie aussi les pages (règles, légal, 404), les liens
+  du pied de page, la fenêtre d'aide en jeu, la présence de toutes les tuiles du
+  fond de relief et la reprise après un échec de chargement simulé. Ce test
+  **efface les données locales** de l'origine `localhost`.
+- `http://localhost:8080/tests/layout.html` : aucun débordement horizontal, de 360 à
+  1920 px de large, sur toutes les pages.
 
 Le titre de la page passe à `PASS n` ou `FAIL x/n`. En ligne de commande :
 
@@ -64,8 +68,11 @@ brave --headless=new --virtual-time-budget=240000 --dump-dom http://localhost:80
 
 ```
 assets/js/
-  main.js                 routeur (#/…), accueil, statistiques, sources
+  main.js                 routeur (#/…), en-tête, pied de page, accueil, statistiques, sources
+  pages/rules.js          page « Règles du jeu »
+  pages/legal.js          mentions légales, politique de confidentialité
   core/                   logique sans DOM
+    site.js               nom du site et de l'auteur
     rng.js                générateur pseudo-aléatoire déterministe
     daily.js              date UTC, graine quotidienne
     geo.js                haversine, cap, projection Equal Earth, polygones
@@ -76,6 +83,8 @@ assets/js/
   games/<jeu>/rules.js    règles et scores (purs, testés)
   games/<jeu>/view.js     écran du jeu
   ui/                     composants : carte du monde, silhouette, saisie, visionneuse
+    help.js               texte des règles (écran d'accueil des jeux, page Règles, aide en jeu)
+    screens.js            accueil d'un jeu, lancement (chargement / erreur), barre de jeu, résultats
 assets/css/app.css
 data/                     données générées (voir DATA.md)
 tools/                    scripts Python de génération des données

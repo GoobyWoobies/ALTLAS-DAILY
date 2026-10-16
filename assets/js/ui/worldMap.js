@@ -30,6 +30,7 @@ function linePath(points) {
   }).join('');
 }
 
+let mapCount = 0; // unique ids for each map's clip path
 let pathsPromise = null;
 /** Pre-computed SVG path data, shared by every map instance. */
 function getPaths() {
@@ -59,6 +60,9 @@ function getPaths() {
     for (let lat = 90; lat >= -90; lat -= 2) edge.push([180, lat]);
     const sphere = `${linePath(edge)}Z`;
     return { byId, other, grat, sphere };
+  });
+  pathsPromise.catch(() => {
+    pathsPromise = null; // let the next map try again
   });
   return pathsPromise;
 }
@@ -102,6 +106,11 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
   const gReliefHigh = s('g', { class: 'wm-relief-high' });
   const gBase = s('g', { class: 'wm-base' });
   const gOver = s('g', { class: 'wm-over' });
+  // the map covers latitudes LAT_BOTTOM..LAT_TOP: when the box is taller than that,
+  // outlines and graticule are cut at the same edge as the relief background
+  const clipId = `wm-clip-${++mapCount}`;
+  svg.append(s('defs', null, s('clipPath', { id: clipId }, s('rect', { x: full.x, y: yTop, width: full.w, height: yBottom - yTop }))));
+  gBase.setAttribute('clip-path', `url(#${clipId})`);
   svg.append(gReliefLow, gReliefHigh, gBase, gOver);
   let reliefOn = relief && savedStyle() !== 'plan';
   let reliefManifest = null;
@@ -120,7 +129,8 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
         onClick: () => setRelief(st === 'relief', true),
       }, st === 'relief' ? 'Relief' : 'Plan')))
     : null;
-  const el = h('div', { class: `wm${interactive ? ' wm-interactive' : ''}${borders ? '' : ' wm-noborders'}`, style: { aspectRatio: `${full.w} / ${full.h}` } }, svg, zoomBtns, kbdHelp, relief ? credit : null, styleBtns,
+  // proportions come from the stylesheet (.wm), so a screen can make its map taller
+  const el = h('div', { class: `wm${interactive ? ' wm-interactive' : ''}${borders ? '' : ' wm-noborders'}` }, svg, zoomBtns, kbdHelp, relief ? credit : null, styleBtns,
     actions ? h('div', { class: 'wm-actions' }, actions) : null);
   let expanded = false;
 
@@ -195,6 +205,14 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     }
   });
 
+  // shown over the map when a layer cannot be loaded
+  const notice = h('p', { class: 'wm-notice', role: 'status', hidden: true });
+  el.append(notice);
+  function showNotice(text) {
+    notice.textContent = text;
+    notice.hidden = false;
+  }
+
   getPaths().then(({ byId, other, grat, sphere }) => {
     gBase.append(s('path', { class: 'wm-sphere', d: sphere }));
     gBase.append(s('path', { class: 'wm-grat', d: grat }));
@@ -206,6 +224,8 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
       gBase.append(p);
     }
     drawOverlays();
+  }).catch(() => {
+    showNotice('Les contours des pays n\'ont pas pu être chargés. Vérifiez votre connexion puis rechargez la page.');
   });
 
   // ------------------------------------------------------------------ relief
@@ -264,8 +284,9 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     }
   }
 
+  let reliefFailed = false;
   function setRelief(on, remember = false) {
-    reliefOn = relief && on;
+    reliefOn = relief && on && !reliefFailed;
     el.classList.toggle('wm-relief', reliefOn);
     styleBtns?.querySelectorAll('button').forEach((b) =>
       b.setAttribute('aria-pressed', String((b.dataset.style === 'relief') === reliefOn)));
@@ -284,17 +305,47 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     getRelief().then((m) => {
       reliefManifest = m;
       updateRelief();
+    }).catch(() => {
+      // keep the game playable on the plan map, and say why the relief is missing
+      reliefFailed = true;
+      setRelief(false);
+      const btn = styleBtns?.querySelector('[data-style="relief"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.title = 'Fond de relief indisponible';
+      }
+      showNotice('Fond de relief indisponible : carte affichée en mode Plan.');
     });
   }
   setRelief(reliefOn);
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(() => {
-      updateRelief();
-      drawOverlays();
-    }).observe(svg);
+    // the box can change shape (layout, enlarged view): keep the same centre and scale
+    const ro = new ResizeObserver(() => {
+      if (!el.isConnected) return ro.disconnect(); // the map left the page
+      const cx = vb.x + vb.w / 2;
+      const cy = vb.y + vb.h / 2;
+      clampVB();
+      vb.x = cx - vb.w / 2;
+      vb.y = cy - vb.h / 2;
+      clampVB();
+      applyVB();
+    });
+    ro.observe(svg);
   }
 
   // ---------------------------------------------------------------- view box
+  // The view box follows the shape of the box on screen, so the map fills it
+  // whatever its proportions (wide on desktop, square on a phone, full window).
+  function aspect() {
+    const r = svg.getBoundingClientRect();
+    return r.width && r.height ? r.height / r.width : full.h / full.w;
+  }
+
+  /** Widest view: the whole world fits in the box. */
+  function maxW(a = aspect()) {
+    return Math.max(full.w, full.h / a);
+  }
+
   function applyVB() {
     svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
     drawOverlays();
@@ -302,14 +353,16 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
   }
 
   function clampVB() {
-    vb.w = Math.min(full.w, Math.max(full.w / MAX_ZOOM, vb.w));
-    vb.h = vb.w * (full.h / full.w);
-    vb.x = Math.min(full.x + full.w - vb.w, Math.max(full.x, vb.x));
-    vb.y = Math.min(full.y + full.h - vb.h, Math.max(full.y, vb.y));
+    const a = aspect();
+    vb.w = Math.min(maxW(a), Math.max(full.w / MAX_ZOOM, vb.w));
+    vb.h = vb.w * a;
+    // centred when the view is larger than the world, kept inside it otherwise
+    vb.x = vb.w >= full.w ? full.x + (full.w - vb.w) / 2 : Math.min(full.x + full.w - vb.w, Math.max(full.x, vb.x));
+    vb.y = vb.h >= full.h ? full.y + (full.h - vb.h) / 2 : Math.min(full.y + full.h - vb.h, Math.max(full.y, vb.y));
   }
 
   function zoomAt(px, py, f) {
-    const w = Math.min(full.w, Math.max(full.w / MAX_ZOOM, vb.w * f));
+    const w = Math.min(maxW(), Math.max(full.w / MAX_ZOOM, vb.w * f));
     const k = w / vb.w;
     vb = { x: px - (px - vb.x) * k, y: py - (py - vb.y) * k, w, h: vb.h * k };
     clampVB();
@@ -321,7 +374,8 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
   }
 
   function reset() {
-    vb = { ...full };
+    vb = { ...full, w: Infinity };
+    clampVB();
     applyVB();
   }
 
@@ -466,8 +520,9 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
       const ys = pts.map((p) => p[1]);
       const bw = Math.max(...xs) - Math.min(...xs);
       const bh = Math.max(...ys) - Math.min(...ys);
-      const wv = Math.max(bw, bh * (full.w / full.h)) * 1.25;
-      vb = { x: (Math.min(...xs) + Math.max(...xs)) / 2 - wv / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 - (wv * full.h / full.w) / 2, w: wv, h: wv * full.h / full.w };
+      const a = aspect();
+      const wv = Math.max(bw, bh / a) * 1.25;
+      vb = { x: (Math.min(...xs) + Math.max(...xs)) / 2 - wv / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 - (wv * a) / 2, w: wv, h: wv * a };
       clampVB();
       applyVB();
     },

@@ -5,11 +5,11 @@ import { createSession } from '../../core/session.js';
 import { countryInput } from '../../ui/countryInput.js';
 import { createSilhouette } from '../../ui/silhouette.js';
 import { createWorldMap } from '../../ui/worldMap.js';
-import { renderIntro, createFrame, renderResults } from '../../ui/screens.js';
+import { renderIntro, createFrame, renderResults, launch } from '../../ui/screens.js';
 import { formatInt, formatArea, capitalize } from '../../core/text.js';
 import { prepareShape } from '../mapglitch/rules.js';
 import {
-  GAME_ID, ROUND_PLAN, MAX_ATTEMPTS, SCORES, DIFFICULTY_LABEL, INITIAL_TRAITS, REVEAL_ORDER,
+  GAME_ID, MAX_ATTEMPTS, SCORES, DIFFICULTY_LABEL, INITIAL_TRAITS, REVEAL_ORDER,
   buildRounds, visibleTraits, roundScore, maxScore, compare, resultSymbol,
   hemisphereNS, hemisphereEW, hemisphereNote, latitudeZone, shapeLabel, formatPosition, areaBracket,
 } from './rules.js';
@@ -32,24 +32,12 @@ const TRAIT_LABEL = {
 
 /** autostart: 'daily' | 'free' (| 'place' for Map Glitch) from a #/route?play= link */
 export function mount(root, autostart = null) {
-  renderIntro(root, {
-    game: GAME_ID,
-    title: TITLE,
-    lede: 'Une fiche d\'identité géographique, un nom masqué. Retrouvez le pays.',
-    rules: [
-      `La fiche affiche d'abord ${INITIAL_TRAITS.length} caractéristiques réelles : superficie, frontières, accès à la mer, hémisphères.`,
-      `Vous avez ${MAX_ATTEMPTS} essais. Chaque erreur révèle une caractéristique supplémentaire, jusqu'à la silhouette.`,
-      'Chaque proposition est comparée au pays mystère : distance et direction, superficie, nombre de voisins, altitude, continent.',
-      `Points : ${SCORES.join(', ')} selon l'essai. Trois fiches par partie, de difficulté croissante.`,
-    ],
-    meta: `${ROUND_PLAN.length} fiches · ${formatInt(maxScore())} points maximum`,
-    onStart: (mode) => play(root, mode),
-  });
-  if (autostart === 'daily' || autostart === 'free') play(root, autostart);
+  const start = (mode) => launch(root, () => play(root, mode));
+  renderIntro(root, { game: GAME_ID, onStart: start });
+  if (autostart === 'daily' || autostart === 'free') start(autostart);
 }
 
 async function play(root, mode) {
-  root.append(h('p', { class: 'loading' }, 'Chargement des données…'));
   const [countries, shapes] = await Promise.all([getCountries(), getShapes()]);
   const session = createSession(GAME_ID, mode, (seed) => buildRounds(countries.list, seed), maxScore());
   if (session.done) return showResults(root, session, countries);
@@ -253,6 +241,6 @@ function showResults(root, session, countries) {
       sub: `${DIFFICULTY_LABEL[r.tier]} · ${r.solved ? `${r.attempts} essai${r.attempts > 1 ? 's' : ''}` : 'non trouvé'}`,
       points: r.score,
     })),
-    onReplay: () => play(root, 'free'),
+    onReplay: () => launch(root, () => play(root, 'free')),
   });
 }

@@ -22,6 +22,12 @@ export function createZoomImage({ src, alt }) {
     view.style.aspectRatio = String(ar);
     el.style.maxWidth = `calc(var(--stage-max-h, 72vh) * ${ar.toFixed(4)})`;
   });
+  // a missing or unreadable image is said plainly instead of leaving an empty frame
+  img.addEventListener('error', () => {
+    el.classList.add('zi-failed');
+    view.append(h('p', { class: 'zi-error', role: 'alert' },
+      'L\'image du relief n\'a pas pu être chargée. Vérifiez votre connexion puis rechargez la page.'));
+  });
 
   function clamp() {
     const w = view.clientWidth;

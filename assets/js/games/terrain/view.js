@@ -4,10 +4,10 @@ import { getPlaces, terrainImageUrl } from '../../core/data.js';
 import { createSession } from '../../core/session.js';
 import { createWorldMap } from '../../ui/worldMap.js';
 import { createZoomImage } from '../../ui/zoomImage.js';
-import { renderIntro, createFrame, renderResults } from '../../ui/screens.js';
+import { renderIntro, createFrame, renderResults, launch } from '../../ui/screens.js';
 import { formatInt } from '../../core/text.js';
 import {
-  GAME_ID, ROUNDS, MAX_HINTS, HINT_PENALTY, MAX_POINTS, LEVELS, TIER_LABEL,
+  GAME_ID, MAX_HINTS, HINT_PENALTY, LEVELS, TIER_LABEL,
   buildRounds, levelPlan, scoreGuess, roundCap, maxScore, resultSymbol, bboxCenter,
 } from './rules.js';
 
@@ -15,26 +15,16 @@ const TITLE = 'Terrain ID';
 
 /** autostart: 'daily' | 'free' (| 'place' for Map Glitch) from a #/route?play= link */
 export function mount(root, autostart = null, query = new URLSearchParams()) {
+  const start = (mode, level) => launch(root, () => play(root, mode, level));
   renderIntro(root, {
     game: GAME_ID,
-    title: TITLE,
-    lede: 'Un relief sans nom ni frontière. Situez-le sur la carte du monde.',
-    rules: [
-      'Chaque manche montre un rendu du relief réel d\'une région : altitudes, côtes, lacs et fleuves, sans aucun nom ni frontière.',
-      'Observez le terrain (zoom à la molette ou avec les boutons), puis cliquez sur la carte du monde à l\'endroit où il se trouve. La carte s\'agrandit en plein écran avec le bouton dédié.',
-      `Un clic dans la zone représentée rapporte ${MAX_POINTS} points ; au-delà, les points diminuent avec la distance.`,
-      `Trois indices facultatifs par manche ; chacun retire ${Math.round(HINT_PENALTY * 100)} % du maximum de la manche.`,
-      'Quatre niveaux : Facile, Moyen, Difficile, Expert. Le défi du jour les parcourt dans l\'ordre ; en partie libre, vous choisissez le niveau.',
-    ],
-    meta: `${ROUNDS} manches · ${formatInt(maxScore())} points maximum`,
     levels: LEVELS.map(({ id, label }) => ({ id, label })),
-    onStart: (mode, level) => play(root, mode, level),
+    onStart: start,
   });
-  if (autostart === 'daily' || autostart === 'free') play(root, autostart, query.get('level') || 'mixte');
+  if (autostart === 'daily' || autostart === 'free') start(autostart, query.get('level') || 'mixte');
 }
 
 async function play(root, mode, level = 'mixte') {
-  root.append(h('p', { class: 'loading' }, 'Chargement des données…'));
   const places = await getPlaces();
   const byId = new Map(places.map((p) => [p.id, p]));
   const plan = levelPlan(mode === 'daily' ? 'mixte' : level);
@@ -185,6 +175,6 @@ function showResults(root, session, byId) {
       sub: `${r.inside ? 'dans la zone' : `${formatInt(r.km)} km`}${r.hints ? ` · ${r.hints} indice${r.hints > 1 ? 's' : ''}` : ''}`,
       points: r.score,
     })),
-    onReplay: () => play(root, 'free', session.mode === 'free' ? (LEVELS.find((l) => l.label === session.variant) || LEVELS[0]).id : 'mixte'),
+    onReplay: () => launch(root, () => play(root, 'free', session.mode === 'free' ? (LEVELS.find((l) => l.label === session.variant) || LEVELS[0]).id : 'mixte')),
   });
 }

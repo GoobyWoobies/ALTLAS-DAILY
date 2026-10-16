@@ -13,6 +13,7 @@ import { test, assert, run } from './harness.js';
 const frame = document.getElementById('app');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROUTES = ['#/', '#/map-glitch', '#/terrain-id', '#/country-dna', '#/stats', '#/sources',
+  '#/regles', '#/mentions-legales', '#/confidentialite',
   '#/map-glitch?play=free', '#/terrain-id?play=free', '#/country-dna?play=free', '#/map-glitch?play=place'];
 const WIDTHS = (new URLSearchParams(location.search).get('w') || '360,390,768,1280,1920').split(',').map(Number);
 
@@ -22,7 +23,7 @@ async function load(hash, width) {
   for (let i = 0; i < 200; i++) {
     await sleep(50);
     const d = frame.contentDocument;
-    if (d?.readyState === 'complete' && d.querySelector('#main') && !d.querySelector('.loading')) break;
+    if (d?.readyState === 'complete' && d.querySelector('#main') && !d.querySelector('.loading, .status-box')) break;
   }
   await sleep(400);
 }

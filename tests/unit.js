@@ -233,6 +233,19 @@ test('placement mode rules', async () => {
   assert(MG.placementScore(3000) < 1);
 });
 
+test('placement mode only offers countries drawn on the map', async () => {
+  const { list } = await getCountries();
+  const world = await getWorld();
+  const drawn = new Set(world.filter((f) => f.id).map((f) => f.id));
+  const undrawn = list.filter((c) => !drawn.has(c.id)).map((c) => c.id);
+  eq(undrawn, ['MCO', 'NRU'], 'countries without an outline (too small)');
+  // same filter as playPlacement: no round may ask for a country absent from the map
+  const placeable = list.filter((c) => drawn.has(c.id));
+  for (let seed = 1; seed <= 300; seed++) {
+    for (const r of MG.buildPlacementRounds(placeable, seed)) assert(drawn.has(r.id), `seed ${seed}: ${r.id}`);
+  }
+});
+
 // ------------------------------------------------------------- terrain id
 test('terrain places dataset', async () => {
   const places = await getPlaces();

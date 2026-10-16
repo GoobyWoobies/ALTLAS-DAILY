@@ -108,6 +108,7 @@ export function pointInPolygon(lon, lat, polygon) {
  * edge is treated as straight in a local equirectangular frame).
  */
 export function distanceToPolygonsKm(lat, lon, polygons) {
+  if (!polygons?.length) return Infinity; // no outline: callers must not offer such a country
   for (const poly of polygons) {
     if (pointInPolygon(lon, lat, poly)) return 0;
   }
