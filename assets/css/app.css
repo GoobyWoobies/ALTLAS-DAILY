@@ -260,23 +260,24 @@ button { font: inherit; color: inherit; }
 .wm-kbd { position: absolute; left: 8px; top: 8px; margin: 0; font: 11px var(--mono); color: var(--muted); background: rgba(251, 250, 248, .9); padding: 2px 6px; border-radius: 2px; pointer-events: none; }
 .wm:not(:focus-within) .wm-kbd { display: none; }
 
-/* satellite background (NASA Blue Marble tiles) */
-.wm-credit { display: none; position: absolute; left: 8px; bottom: 6px; margin: 0; font: 10px var(--mono); color: rgba(255, 255, 255, .7); pointer-events: none; }
-.wm-sat .wm-credit { display: block; }
+/* shaded relief background (tiles from tools/build_relief_map.py) */
+.wm-credit { display: none; position: absolute; left: 8px; bottom: 6px; margin: 0; font: 10px var(--mono); color: var(--muted); background: rgba(251, 250, 248, .75); padding: 0 4px; border-radius: 2px; pointer-events: none; }
+.wm-relief .wm-credit { display: block; }
 .wm-style { position: absolute; right: 8px; bottom: 8px; display: flex; border: 1px solid var(--line-strong); border-radius: var(--r); overflow: hidden; background: rgba(251, 250, 248, .92); }
 .wm-style button { border: 0; background: transparent; padding: 4px 10px; font: 500 11px var(--mono); letter-spacing: .04em; color: var(--muted); cursor: pointer; }
 .wm-style button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
-.wm-sat { background: #08111c; }
-.wm-sat .wm-sphere { fill: none; }
-.wm-sat .wm-grat { stroke: rgba(255, 255, 255, .1); }
-.wm-sat .wm-land, .wm-sat.wm-noborders .wm-land { fill: none; stroke: rgba(255, 255, 255, .3); stroke-width: .5; }
-.wm-sat.wm-noborders .wm-land { stroke: none; }
-.wm-sat .wm-land.wm-hl { fill: rgba(224, 122, 79, .35); stroke: #f0956b; stroke-width: 1.5; }
-.wm-sat .wm-bbox { fill: rgba(255, 255, 255, .12); stroke: #f6a77f; stroke-width: 2; }
-.wm-sat .wm-marker-guess { fill: #fff; stroke: var(--ink); }
-.wm-sat .wm-line { stroke: #fff; }
-.wm-sat .wm-marker-cursor { stroke: #fff; }
-.wm-sat .wm-marker-ring { stroke: #f6a77f; }
+.wm-relief .wm-sphere { fill: none; }
+.wm-relief .wm-grat { stroke: rgba(40, 52, 60, .14); }
+.wm-relief .wm-land { fill: none; stroke: rgba(58, 48, 38, .38); stroke-width: .6; }
+.wm-relief.wm-noborders .wm-land { stroke: none; }
+.wm-relief .wm-land.wm-hl { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+
+/* enlarged map: fills the window, keeps the projection's aspect ratio (about 2.24:1) */
+.wm-expand[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.wm-actions { display: none; position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); }
+.wm-expanded { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(calc(100vw - 32px), calc((100vh - 32px) * 2.24)); box-shadow: 0 0 0 100vmax rgba(28, 27, 25, .55); }
+.wm-expanded .wm-actions { display: block; }
+.wm-lock, .wm-lock body { overflow: hidden; }
 
 /* ---------------------------------------------------------- map glitch */
 .mg-stage {
@@ -301,7 +302,7 @@ button { font: inherit; color: inherit; }
 .zi-img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
 .zi-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .tr-stage { padding: 12px; }
-.tr-layout { grid-template-columns: minmax(0, 1.1fr) minmax(400px, 1fr); }
+.tr-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); gap: 32px; }
 .tr-panel .panel-head .muted { font-family: var(--mono); font-size: 12px; }
 .cap { color: var(--ink); }
 .tr-actions { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }

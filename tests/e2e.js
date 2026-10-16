@@ -308,25 +308,32 @@ test('world map can be played with the keyboard', async () => {
   assert($('.muted.small').textContent.includes('Position choisie'), 'position announced');
 });
 
-test('terrain id: free game at a chosen level, satellite map', async () => {
+test('terrain id: free game at a chosen level, relief map', async () => {
   await open('#/terrain-id');
   click(await waitFor(() => $('.levels [data-level="4"]'), 'level picker'));
   eq($('.levels [data-level="4"]').getAttribute('aria-checked'), 'true');
   click($('[data-action="free"]'));
   await waitFor(() => $('.gf-mode')?.textContent.includes('Expert'), 'expert label');
   assert($('.stage-caption').textContent.includes('Expert'), 'round is expert');
-  const map = await waitFor(() => $('.tr-map .wm.wm-sat'), 'satellite map');
-  await waitFor(() => map.querySelector('.wm-sat-low image'), 'satellite tiles');
+  const map = await waitFor(() => $('.tr-map .wm.wm-relief'), 'relief map');
+  await waitFor(() => map.querySelector('.wm-relief-low image'), 'relief tiles');
   click(map.querySelector('[data-style="plan"]'));
-  assert(!map.classList.contains('wm-sat'), 'switched to plan');
-  eq(map.querySelectorAll('.wm-sat-low image').length, 0, 'tiles removed in plan view');
-  click(map.querySelector('[data-style="satellite"]'));
-  assert(map.classList.contains('wm-sat'), 'back to satellite');
+  assert(!map.classList.contains('wm-relief'), 'switched to plan');
+  eq(map.querySelectorAll('.wm-relief-low image').length, 0, 'tiles removed in plan view');
+  click(map.querySelector('[data-style="relief"]'));
+  assert(map.classList.contains('wm-relief'), 'back to relief');
   // zooming in loads sharper tiles
   for (let i = 0; i < 4; i++) click(map.querySelector('[aria-label="Zoom avant"]'));
-  await waitFor(() => map.querySelector('.wm-sat-high image'), 'detail tiles after zoom');
-  const lvl = Number(map.querySelector('.wm-sat-high image').dataset.key.split('/')[0]);
+  await waitFor(() => map.querySelector('.wm-relief-high image'), 'detail tiles after zoom');
+  const lvl = Number(map.querySelector('.wm-relief-high image').dataset.key.split('/')[0]);
   assert(lvl >= 2, `detail level ${lvl}`);
+  // the map can be enlarged to the whole window, Escape restores it
+  const small = map.getBoundingClientRect().width;
+  click(map.querySelector('.wm-expand'));
+  assert(map.classList.contains('wm-expanded'), 'map enlarged');
+  assert(map.getBoundingClientRect().width > small, 'enlarged map is wider');
+  win().document.dispatchEvent(new (win().KeyboardEvent)('keydown', { key: 'Escape', bubbles: true }));
+  assert(!map.classList.contains('wm-expanded'), 'Escape restores the map');
 });
 
 test('stats page reflects the games', async () => {

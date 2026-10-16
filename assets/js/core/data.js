@@ -35,8 +35,8 @@ export function terrainImageUrl(id) {
   return new URL(`../../../data/terrain/${id}.webp`, import.meta.url).href;
 }
 
-export const getSatellite = () => loadJson('data/satellite/manifest.json');
+export const getRelief = () => loadJson('data/relief/manifest.json');
 
-export function satelliteTileUrl(level, key) {
-  return new URL(`../../../data/satellite/${level}/${key}.webp`, import.meta.url).href;
+export function reliefTileUrl(level, key) {
+  return new URL(`../../../data/relief/${level}/${key}.webp`, import.meta.url).href;
 }

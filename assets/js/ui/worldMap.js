@@ -2,12 +2,12 @@
 // Supports wheel / pinch / button zoom, drag to pan, and click-to-pick.
 import { s, h, clear, icon } from './dom.js';
 import { equalEarth, equalEarthInverse } from '../core/geo.js';
-import { getWorld, getSatellite, satelliteTileUrl } from '../core/data.js';
+import { getWorld, getRelief, reliefTileUrl } from '../core/data.js';
 
 const K = 100; // projection units -> SVG units
 const LAT_TOP = 84;
 const LAT_BOTTOM = -58;
-const MAX_ZOOM = 60;
+const MAX_ZOOM = 150;
 
 function project(lon, lat) {
   const [x, y] = equalEarth(lon, lat);
@@ -77,9 +77,10 @@ function savedStyle() {
  * @param {(p: {lat:number, lon:number}) => void} [o.onPick]  click handler (interactive maps)
  * @param {string} [o.label]  accessible label
  * @param {boolean} [o.borders]  draw country borders (plan style)
- * @param {boolean} [o.satellite]  offer the satellite background (NASA Blue Marble), on by default
+ * @param {boolean} [o.relief]  offer the shaded relief background, on by default
+ * @param {Node} [o.actions]  controls shown over the map while it is enlarged (interactive maps)
  */
-export function createWorldMap({ onPick = null, label = 'Carte du monde', borders = true, satellite = false } = {}) {
+export function createWorldMap({ onPick = null, label = 'Carte du monde', borders = true, relief = false, actions = null } = {}) {
   const [xMax] = project(180, 0);
   const [, yTop] = project(0, LAT_TOP);
   const [, yBottom] = project(0, LAT_BOTTOM);
@@ -97,28 +98,50 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     role: 'img',
     'aria-label': label,
   });
-  const gSatLow = s('g', { class: 'wm-sat-low' });
-  const gSatHigh = s('g', { class: 'wm-sat-high' });
+  const gReliefLow = s('g', { class: 'wm-relief-low' });
+  const gReliefHigh = s('g', { class: 'wm-relief-high' });
   const gBase = s('g', { class: 'wm-base' });
   const gOver = s('g', { class: 'wm-over' });
-  svg.append(gSatLow, gSatHigh, gBase, gOver);
-  let satOn = satellite && savedStyle() !== 'plan';
-  let satManifest = null;
+  svg.append(gReliefLow, gReliefHigh, gBase, gOver);
+  let reliefOn = relief && savedStyle() !== 'plan';
+  let reliefManifest = null;
 
   const zoomBtns = h('div', { class: 'wm-zoom' },
     h('button', { class: 'icon-btn', type: 'button', title: 'Zoom avant', 'aria-label': 'Zoom avant', onClick: () => zoomCenter(0.6) }, icon('plus')),
     h('button', { class: 'icon-btn', type: 'button', title: 'Zoom arrière', 'aria-label': 'Zoom arrière', onClick: () => zoomCenter(1 / 0.6) }, icon('minus')),
-    h('button', { class: 'icon-btn', type: 'button', title: 'Vue entière', 'aria-label': 'Vue entière', onClick: () => reset() }, icon('reset')));
+    h('button', { class: 'icon-btn', type: 'button', title: 'Vue entière', 'aria-label': 'Vue entière', onClick: () => reset() }, icon('reset')),
+    onPick ? h('button', { class: 'icon-btn wm-expand', type: 'button', title: 'Agrandir la carte', 'aria-label': 'Agrandir la carte', 'aria-pressed': 'false', onClick: () => setExpanded(!expanded) }, icon('expand')) : null);
   const kbdHelp = h('p', { class: 'wm-kbd', 'aria-hidden': 'true' }, 'Flèches : déplacer · Entrée : placer · + / − : zoom');
-  const credit = h('p', { class: 'wm-credit' }, 'Image : NASA Blue Marble');
-  const styleBtns = satellite
+  const credit = h('p', { class: 'wm-credit' }, 'Relief : AWS Terrain Tiles, Natural Earth');
+  const styleBtns = relief
     ? h('div', { class: 'wm-style', role: 'group', 'aria-label': 'Fond de carte' },
-      ['satellite', 'plan'].map((st) => h('button', {
+      ['relief', 'plan'].map((st) => h('button', {
         type: 'button', 'data-style': st, 'aria-pressed': 'false',
-        onClick: () => setSatellite(st === 'satellite', true),
-      }, st === 'satellite' ? 'Satellite' : 'Plan')))
+        onClick: () => setRelief(st === 'relief', true),
+      }, st === 'relief' ? 'Relief' : 'Plan')))
     : null;
-  const el = h('div', { class: `wm${interactive ? ' wm-interactive' : ''}${borders ? '' : ' wm-noborders'}`, style: { aspectRatio: `${full.w} / ${full.h}` } }, svg, zoomBtns, kbdHelp, satellite ? credit : null, styleBtns);
+  const el = h('div', { class: `wm${interactive ? ' wm-interactive' : ''}${borders ? '' : ' wm-noborders'}`, style: { aspectRatio: `${full.w} / ${full.h}` } }, svg, zoomBtns, kbdHelp, relief ? credit : null, styleBtns,
+    actions ? h('div', { class: 'wm-actions' }, actions) : null);
+  let expanded = false;
+
+  // enlarged view: the map fills the window (Escape or the same button to leave)
+  function setExpanded(on) {
+    expanded = on;
+    el.classList.toggle('wm-expanded', on);
+    document.documentElement.classList.toggle('wm-lock', on);
+    const btn = zoomBtns.querySelector('.wm-expand');
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(on));
+      btn.title = on ? 'Réduire la carte' : 'Agrandir la carte';
+      btn.setAttribute('aria-label', btn.title);
+      btn.replaceChildren(icon(on ? 'shrink' : 'expand'));
+    }
+    if (on) document.addEventListener('keydown', onEscape);
+    else document.removeEventListener('keydown', onEscape);
+  }
+  function onEscape(e) {
+    if (e.key === 'Escape' || !el.isConnected) setExpanded(false);
+  }
   let cursor = null; // keyboard cursor {lat, lon}
 
   function setKeyboard(on) {
@@ -185,17 +208,17 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     drawOverlays();
   });
 
-  // --------------------------------------------------------------- satellite
-  // Tiles are pre-rendered in the same Equal Earth frame (tools/build_satellite.py).
+  // ------------------------------------------------------------------ relief
+  // Tiles are pre-rendered in the same Equal Earth frame (tools/build_relief_map.py).
   // Level 0 always covers the whole map; one sharper level is added for the view.
-  function satTile(level, li, key) {
+  function reliefTile(level, li, key) {
     const [c, r] = key.split('_').map(Number);
-    const { extent, tile } = satManifest;
+    const { extent, tile } = reliefManifest;
     const unitsPerTilePx = (extent.x1 - extent.x0) / level.w;
     const wpx = Math.min(tile, level.w - c * tile);
     const hpx = Math.min(tile, level.h - r * tile);
     return s('image', {
-      href: satelliteTileUrl(li, key),
+      href: reliefTileUrl(li, key),
       x: extent.x0 + c * tile * unitsPerTilePx,
       y: extent.y0 + r * tile * unitsPerTilePx,
       // a hair of overlap hides seams between tiles
@@ -206,12 +229,12 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     });
   }
 
-  function updateSatellite() {
-    if (!satOn || !satManifest) return;
-    const { extent, levels, tile } = satManifest;
+  function updateRelief() {
+    if (!reliefOn || !reliefManifest) return;
+    const { extent, levels, tile } = reliefManifest;
     const extW = extent.x1 - extent.x0;
-    if (!gSatLow.firstChild) {
-      for (const key of levels[0].tiles) gSatLow.append(satTile(levels[0], 0, key));
+    if (!gReliefLow.firstChild) {
+      for (const key of levels[0].tiles) gReliefLow.append(reliefTile(levels[0], 0, key));
     }
     const needPxPerUnit = (1 / unitsPerPx()) * (window.devicePixelRatio || 1);
     let li = levels.findIndex((L) => L.w / extW >= needPxPerUnit);
@@ -231,42 +254,42 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
         }
       }
     }
-    for (const img of [...gSatHigh.children]) {
+    for (const img of [...gReliefHigh.children]) {
       if (!want.has(img.dataset.key)) img.remove();
       else want.delete(img.dataset.key);
     }
     for (const k of want) {
       const [l, key] = k.split('/');
-      gSatHigh.append(satTile(levels[Number(l)], Number(l), key));
+      gReliefHigh.append(reliefTile(levels[Number(l)], Number(l), key));
     }
   }
 
-  function setSatellite(on, remember = false) {
-    satOn = satellite && on;
-    el.classList.toggle('wm-sat', satOn);
+  function setRelief(on, remember = false) {
+    reliefOn = relief && on;
+    el.classList.toggle('wm-relief', reliefOn);
     styleBtns?.querySelectorAll('button').forEach((b) =>
-      b.setAttribute('aria-pressed', String((b.dataset.style === 'satellite') === satOn)));
+      b.setAttribute('aria-pressed', String((b.dataset.style === 'relief') === reliefOn)));
     if (remember) {
       try {
-        localStorage.setItem(STYLE_KEY, satOn ? 'satellite' : 'plan');
+        localStorage.setItem(STYLE_KEY, reliefOn ? 'relief' : 'plan');
       } catch {
         /* preference only */
       }
     }
-    if (!satOn) {
-      clear(gSatLow);
-      clear(gSatHigh);
+    if (!reliefOn) {
+      clear(gReliefLow);
+      clear(gReliefHigh);
       return;
     }
-    getSatellite().then((m) => {
-      satManifest = m;
-      updateSatellite();
+    getRelief().then((m) => {
+      reliefManifest = m;
+      updateRelief();
     });
   }
-  setSatellite(satOn);
+  setRelief(reliefOn);
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => {
-      updateSatellite();
+      updateRelief();
       drawOverlays();
     }).observe(svg);
   }
@@ -275,7 +298,7 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
   function applyVB() {
     svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
     drawOverlays();
-    updateSatellite();
+    updateRelief();
   }
 
   function clampVB() {
@@ -423,6 +446,7 @@ export function createWorldMap({ onPick = null, label = 'Carte du monde', border
     },
     /** overlays: [{kind:'marker', lat, lon, style:'guess'|'target'|'ring'}, {kind:'line', a, b}, {kind:'bbox', bbox}] */
     setOverlays,
+    setExpanded: (on) => expanded !== on && setExpanded(on),
     highlight(ids = [], cls = 'wm-hl') {
       highlighted = { ids, cls };
       for (const p of countryEls.values()) p.classList.remove('wm-hl', 'wm-hl2');

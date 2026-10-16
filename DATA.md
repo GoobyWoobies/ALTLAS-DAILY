@@ -12,7 +12,7 @@ Ce dossier n'est pas à publier.
 | `data/world.json` | Contours simplifiés de tous les territoires (lon/lat), pour la carte du monde | `tools/build_countries.py` |
 | `data/terrain/places.json` | 94 lieux de Terrain ID sur 4 niveaux : emprise, indices, explication (rédaction originale) | à la main (`tools/terrain_places_v2.py` trace l'ajout du 15/10/2026) |
 | `data/terrain/*.webp` | Rendus de relief sans nom ni frontière | `tools/build_terrain.py` |
-| `data/satellite/` | Fond satellite de la carte de Terrain ID : tuiles WebP de 512 px sur 4 niveaux, en projection Equal Earth | `tools/build_satellite.py` |
+| `data/relief/` | Fond de relief ombré de la carte de Terrain ID : tuiles WebP de 512 px sur 4 niveaux, en projection Equal Earth | `tools/build_relief_map.py` |
 
 ## Sources et licences
 
@@ -21,8 +21,7 @@ Ce dossier n'est pas à publier.
 | [Natural Earth](https://www.naturalearthdata.com/) v5 : admin-0 countries 1:10m, land, lakes, rivers | Contours, silhouettes, carte, côtes, lacs et fleuves des rendus de relief | Domaine public |
 | [mledoze/countries](https://github.com/mledoze/countries) | Superficie, frontières terrestres, enclavement, région, noms français et alias | ODbL 1.0 (attribution, partage à l'identique de la base dérivée) |
 | [Wikidata](https://www.wikidata.org/) : propriétés P610 (point culminant) et P2044 (altitude) | Points culminants, extraction unique le 15/10/2026 | CC0 |
-| [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data, encodage Terrarium) | Altitudes des rendus de relief, téléchargées une fois | Attribution requise (voir ci-dessous) |
-| [NASA Blue Marble: Next Generation](https://visibleearth.nasa.gov/collection/1484/blue-marble), juillet 2004, 21 600 × 10 800 | Fond satellite de la carte de réponse de Terrain ID, téléchargé une fois | Domaine public (NASA), mention de la source |
+| [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (AWS Open Data, encodage Terrarium) | Altitudes des rendus de relief et du fond de carte de Terrain ID, téléchargées une fois | Attribution requise (voir ci-dessous) |
 
 Attribution des Terrain Tiles : SRTM et GMTED2010 (NASA/USGS), ETOPO1 (NOAA),
 NED et 3DEP (USGS), EU-DEM (Copernicus), Geoscience Australia, LINZ (Nouvelle-Zélande),
@@ -78,7 +77,7 @@ licences » du site reprend ces mentions.
 python tools/build_countries.py
 python tools/build_terrain.py            # tous les lieux
 python tools/build_terrain.py alpes      # un seul lieu
-python tools/build_satellite.py          # fond satellite (environ 4 Mo de tuiles)
+python tools/build_relief_map.py         # fond de relief de la carte (tuiles Terrarium z6 en cache)
 ```
 
 Niveaux de Terrain ID : 1 Facile (formes très connues), 2 Moyen (régions célèbres),

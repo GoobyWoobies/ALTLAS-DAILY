@@ -21,7 +21,7 @@ export function mount(root, autostart = null, query = new URLSearchParams()) {
     lede: 'Un relief sans nom ni frontière. Situez-le sur la carte du monde.',
     rules: [
       'Chaque manche montre un rendu du relief réel d\'une région : altitudes, côtes, lacs et fleuves, sans aucun nom ni frontière.',
-      'Observez le terrain (zoom à la molette ou avec les boutons), puis cliquez sur la carte du monde à l\'endroit où il se trouve.',
+      'Observez le terrain (zoom à la molette ou avec les boutons), puis cliquez sur la carte du monde à l\'endroit où il se trouve. La carte s\'agrandit en plein écran avec le bouton dédié.',
       `Un clic dans la zone représentée rapporte ${MAX_POINTS} points ; au-delà, les points diminuent avec la distance.`,
       `Trois indices facultatifs par manche ; chacun retire ${Math.round(HINT_PENALTY * 100)} % du maximum de la manche.`,
       'Quatre niveaux : Facile, Moyen, Difficile, Expert. Le défi du jour les parcourt dans l\'ordre ; en partie libre, vous choisissez le niveau.',
@@ -53,14 +53,18 @@ function playRound(root, frame, session, byId) {
   let finished = false;
 
   const viewer = createZoomImage({ src: terrainImageUrl(place.id), alt: 'Relief de la région mystère (sans nom ni frontière)' });
+  // shown over the enlarged map, so an answer can be confirmed without leaving it
+  const validateOver = h('button', { class: 'btn btn-primary', type: 'button', disabled: true, onClick: () => guess && resolve() }, 'Valider la position', icon('arrow'));
   const map = createWorldMap({
-    satellite: true,
+    relief: true,
+    actions: validateOver,
     label: 'Carte du monde : cliquez pour placer votre réponse',
     onPick: (p) => {
       if (finished) return;
       guess = p;
       map.setOverlays([{ kind: 'marker', lat: p.lat, lon: p.lon, style: 'guess' }]);
       validate.disabled = false;
+      validateOver.disabled = false;
       mapNote.textContent = `Position choisie : ${fmtLat(p.lat)}, ${fmtLon(p.lon)}`;
     },
   });
@@ -122,7 +126,9 @@ function playRound(root, frame, session, byId) {
     if (session.done) session.finish();
     frame.update();
     map.setInteractive(false);
+    map.setExpanded(false);
     validate.remove();
+    validateOver.remove();
     renderHints();
 
     const center = bboxCenter(place.bbox);
